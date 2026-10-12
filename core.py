@@ -63,6 +63,7 @@ def run_agent(
     verbose: bool = True,
     tool_dispatcher=None,
     _spinner: Spinner | None = None,
+    max_steps : int = 30,
 ) -> str:
     """
     Core agent loop.
@@ -84,8 +85,9 @@ def run_agent(
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": task},
     ]
-
-    while True:
+    step = 0
+    while step<max_steps:
+        step += 1
         if spinner:
             spinner.start("Thinking…")
         try:
@@ -126,7 +128,8 @@ def run_agent(
                 "tool_call_id": tc.id,
                 "content": str(result),
             })
-
+        
+        return f"[max_steps={max_steps} reached — no final answer]"
 
 def run_agent_mixed(
     task: str,
