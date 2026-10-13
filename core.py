@@ -1,3 +1,5 @@
+import re
+FLAG_RE = re.compile(r"[A-Za-z0-9_]{2,}\{[^}\n]{1,256}\}")
 """
 The agent loop.
 
@@ -99,7 +101,10 @@ def run_agent(
         messages.append(response.to_dict())
 
         if not response.tool_calls:
-            return response.content or ""
+            content = response.content or ""
+            if m := FLAG_RE.search(content):
+                return f"FLAG FOUND: {m.group(0)}"
+            return content
 
         dispatch = tool_dispatcher or call_tool
 
@@ -123,13 +128,20 @@ def run_agent(
                     result_preview = result_preview[:100] + "…"
                 spinner.println(f"  ✓ {tc.name}({args_str}) → {result_preview}")
 
+            result - str(result)
+            if m := FLAG_RE.search(result):
+                messages.append({"role": "tool", "tool_call_id": tc.id,
+                                 "content": result})
+                return f"FLAG FOUND: {m.group(0)}"
+            messages.append({"role": "tool","tool_call_id": tc.id,
+                             "content" : result})
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc.id,
                 "content": str(result),
             })
         
-        return f"[max_steps={max_steps} reached — no final answer]"
+        return f"[max_steps={max_steps} reached — no final answer]" 
 
 def run_agent_mixed(
     task: str,
