@@ -1,4 +1,4 @@
-import re
+
 FLAG_RE = re.compile(r"[A-Za-z0-9_]{2,}\{[^}\n]{1,256}\}")
 """
 The agent loop.
@@ -8,6 +8,11 @@ run_agent_mixed() — local Ollama orchestrates; routes complex tasks to a remot
 """
 
 from __future__ import annotations
+
+import json
+import re
+import uuid
+from pathlib import Path
 
 from providers import LLMProvider, LLMMessage
 from tools import TOOL_SCHEMAS, call_tool
@@ -49,6 +54,12 @@ _ASK_REMOTE_SCHEMA = {
         },
     },
 }
+_LOG_DIR = Path("logs")
+
+def _log_step(run_id: str, record : dict) -> None:
+    _LOG_DIR.mkdir(exist_ok=True)
+    with open(_LOG_DIR / f"{run_id}.jsonl","a",encoding ="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
 
 
 def _fmt_args(arguments: dict) -> str:
@@ -66,6 +77,7 @@ def run_agent(
     tool_dispatcher=None,
     _spinner: Spinner | None = None,
     max_steps : int = 30,
+    run_id: str | None = None,
 ) -> str:
     """
     Core agent loop.
@@ -87,6 +99,10 @@ def run_agent(
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": task},
     ]
+    if run_id is None:
+        run_id = uuid.uuid4().hex[:8]
+    _log_step(run_id, {"event": "start", "task": task, "provider": str(provider)})
+
     step = 0
     while step<max_steps:
         step += 1
@@ -128,20 +144,23 @@ def run_agent(
                     result_preview = result_preview[:100] + "…"
                 spinner.println(f"  ✓ {tc.name}({args_str}) → {result_preview}")
 
-            result - str(result)
+            result = str(result)
+            _log_step(run_id, {"event": "tool_call", "step": step,
+                               "tool": tc.name, "args": tc.arguments,
+                               "result": result[:500]})
             if m := FLAG_RE.search(result):
                 messages.append({"role": "tool", "tool_call_id": tc.id,
                                  "content": result})
+                _log_step(run_id, {"event":"flag", "step": step, "flag": m.group(0)})
                 return f"FLAG FOUND: {m.group(0)}"
             messages.append({"role": "tool","tool_call_id": tc.id,
                              "content" : result})
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tc.id,
-                "content": str(result),
-            })
-        
-        return f"[max_steps={max_steps} reached — no final answer]" 
+            
+            
+            
+    _log_step(run_id, {"event": "end", "success": False, "steps": step})
+
+    return f"[max_steps={max_steps} reached — no final answer]" 
 
 def run_agent_mixed(
     task: str,
