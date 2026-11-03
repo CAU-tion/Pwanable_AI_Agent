@@ -69,7 +69,11 @@ class OpenAICompatProvider(LLMProvider):
         if base_url:
             kwargs["base_url"] = base_url
 
-        self.client = OpenAI(**kwargs)
+        self.client = OpenAI(
+            **kwargs,
+            max_retries=0,
+            timeout=60.0,
+        )
         self.model = model
         self.name = f"{label}/{model}"
 
