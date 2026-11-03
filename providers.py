@@ -1,8 +1,9 @@
+
 from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass
@@ -10,6 +11,7 @@ class ToolCall:
     id: str
     name: str
     arguments: dict
+    extra_content: dict | None = None
 
 
 @dataclass
@@ -17,6 +19,7 @@ class LLMMessage:
     role: str
     content: str | None
     tool_calls: list[ToolCall] | None = None
+    extra_content: dict | None = None
 
     def to_dict(self) -> dict:
         d: dict = {"role": self.role}
@@ -25,14 +28,19 @@ class LLMMessage:
             d["content"] = self.content
 
         if self.tool_calls:
-            d["tool_calls"] = [
-                {
+            d["tool_calls"] = []
+            for tc in self.tool_calls:
+                call = {
                     "id": tc.id,
                     "name": tc.name,
-                    "arguments": tc.arguments
+                    "arguments": tc.arguments,
                 }
-                for tc in self.tool_calls
-            ]
+                if tc.extra_content is not None:
+                    call["extra_content"] = tc.extra_content
+                d["tool_calls"].append(call)
+
+        if self.extra_content is not None:
+            d["extra_content"] = self.extra_content
 
         return d
 
@@ -48,7 +56,6 @@ class LLMProvider:
 
 
 class OpenAICompatProvider(LLMProvider):
-
     def __init__(
         self,
         api_key: str,
@@ -59,7 +66,6 @@ class OpenAICompatProvider(LLMProvider):
         from openai import OpenAI
 
         kwargs: dict = {"api_key": api_key}
-
         if base_url:
             kwargs["base_url"] = base_url
 
@@ -81,21 +87,27 @@ class OpenAICompatProvider(LLMProvider):
         msg = response.choices[0].message
 
         tool_calls = None
-
         if msg.tool_calls:
-            tool_calls = [
-                ToolCall(
-                    id=tc.id,
-                    name=tc.function.name,
-                    arguments=json.loads(tc.function.arguments),
+            tool_calls = []
+            for tc in msg.tool_calls:
+                tc_extra = (tc.model_extra or {}).get("extra_content")
+
+                tool_calls.append(
+                    ToolCall(
+                        id=tc.id,
+                        name=tc.function.name,
+                        arguments=json.loads(tc.function.arguments),
+                        extra_content=tc_extra,
+                    )
                 )
-                for tc in msg.tool_calls
-            ]
+
+        msg_extra = (msg.model_extra or {}).get("extra_content")
 
         return LLMMessage(
             role="assistant",
             content=msg.content,
             tool_calls=tool_calls,
+            extra_content=msg_extra,
         )
 
 
@@ -111,27 +123,44 @@ def _to_openai_messages(canonical: list[dict]) -> list[dict]:
             })
 
         elif msg["role"] == "assistant" and msg.get("tool_calls"):
-            result.append({
+            serialized_calls = []
+
+            for tc in msg["tool_calls"]:
+                call = {
+                    "id": tc["id"],
+                    "type": "function",
+                    "function": {
+                        "name": tc["name"],
+                        "arguments": json.dumps(tc["arguments"]),
+                    },
+                }
+
+                if tc.get("extra_content") is not None:
+                    call["extra_content"] = tc["extra_content"]
+
+                serialized_calls.append(call)
+
+            assistant_msg = {
                 "role": "assistant",
                 "content": msg.get("content"),
-                "tool_calls": [
-                    {
-                        "id": tc["id"],
-                        "type": "function",
-                        "function": {
-                            "name": tc["name"],
-                            "arguments": json.dumps(tc["arguments"]),
-                        },
-                    }
-                    for tc in msg["tool_calls"]
-                ],
-            })
+                "tool_calls": serialized_calls,
+            }
+
+            if msg.get("extra_content") is not None:
+                assistant_msg["extra_content"] = msg["extra_content"]
+
+            result.append(assistant_msg)
 
         else:
-            result.append({
+            plain_msg = {
                 "role": msg["role"],
                 "content": msg.get("content", ""),
-            })
+            }
+
+            if msg["role"] == "assistant" and msg.get("extra_content") is not None:
+                plain_msg["extra_content"] = msg["extra_content"]
+
+            result.append(plain_msg)
 
     return result
 
