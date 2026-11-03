@@ -1,5 +1,3 @@
-
-FLAG_RE = re.compile(r"[A-Za-z0-9_]{2,}\{[^}\n]{1,256}\}")
 """
 The agent loop.
 
@@ -17,6 +15,8 @@ from pathlib import Path
 from providers import LLMProvider, LLMMessage
 from tools import TOOL_SCHEMAS, call_tool
 from ui import Spinner
+
+FLAG_RE = re.compile(r"[A-Za-z0-9_]{2,}\{[^}\n]{1,256}\}")
 
 _SYSTEM_DEFAULT = (
     "You are a helpful assistant. Use the available tools when needed. "
@@ -167,6 +167,9 @@ def run_agent_mixed(
     local_provider: LLMProvider,
     remote_provider: LLMProvider,
     verbose: bool = True,
+    max_steps: int = 30,
+    remote_max_steps: int = 10,
+    run_id: str | None = None,
 ) -> str:
     """
     Mixed-mode agent loop.
@@ -176,11 +179,28 @@ def run_agent_mixed(
     """
     spinner: Spinner | None = Spinner() if verbose else None
 
+    if run_id is None:
+        run_id = uuid.uuid4().hex[:8]
+    remote_count = 0
+
     def ask_remote(task: str) -> str:
+        nonlocal remote_count
+        remote_count += 1
+        child_run_id = f"{run_id}_remote{remote_count}"
+        _log_step(run_id, {"event": "delegate", "child_run_id": child_run_id, "task": task})
+
         task_preview = (task[:60] + "…") if len(task) > 60 else task
         if spinner:
             spinner.update(f"→ remote ({remote_provider}): {task_preview}")
-        result = run_agent(task, remote_provider, verbose=False)
+        try:
+            result = run_agent(task, remote_provider, verbose=False,
+                               max_steps=remote_max_steps, run_id=child_run_id)
+        except Exception as e:
+            _log_step(run_id, {"event": "delegate_error", 
+                               "child_run_id": child_run_id, "error": str(e)})
+            result = f"Error: remote model failed: {e}"
+
+            
         if spinner:
             spinner.update("← remote: done")
         return result
@@ -195,4 +215,6 @@ def run_agent_mixed(
         system_prompt=_SYSTEM_MIXED,
         verbose=verbose,
         _spinner=spinner,
+        max_steps=max_steps,
+        run_id=run_id,
     )
