@@ -1,0 +1,14 @@
+# 가상환경
+.venv/
+venv/
+
+# API 키
+.env
+.env.*
+!.env.example
+
+# 실행 및 테스트 결과
+__pycache__/
+*.py[cod]
+.pytest_cache/
+logs/
