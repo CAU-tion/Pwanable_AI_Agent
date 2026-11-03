@@ -1,5 +1,3 @@
-
-FLAG_RE = re.compile(r"[A-Za-z0-9_]{2,}\{[^}\n]{1,256}\}")
 """
 The agent loop.
 
@@ -17,6 +15,8 @@ from pathlib import Path
 from providers import LLMProvider, LLMMessage
 from tools import TOOL_SCHEMAS, call_tool
 from ui import Spinner
+
+FLAG_RE = re.compile(r"[A-Za-z0-9_]{2,}\{[^}\n]{1,256}\}")
 
 _SYSTEM_DEFAULT = (
     "You are a helpful assistant. Use the available tools when needed. "
